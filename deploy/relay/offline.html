@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7f9">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1118">
+<meta name="robots" content="noindex">
+<title>SO-101 · стенд сейчас выключен</title>
+<style>
+  /* Страница отдаётся, когда до стенда нет маршрута: публичный доступ
+     выключен либо стенд обесточен. Человек пришёл по QR-коду с таблички и
+     должен понять, что дело не в его телефоне. Отсюда и тон: не ошибка, а
+     режим работы. Всё инлайном — за пределами Caddy на сервере ничего нет. */
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100dvh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    font: 400 17px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f6f7f9; color: #0e1118;
+  }
+  main { max-width: 26rem; text-align: center; }
+  .arm { width: 96px; height: 96px; margin: 0 auto 28px; display: block; opacity: .45; }
+  h1 { margin: 0 0 12px; font-size: 26px; line-height: 1.25; font-weight: 700; letter-spacing: -.01em; }
+  p { margin: 0 0 10px; color: #5c6577; }
+  .hint {
+    margin-top: 28px; padding-top: 20px; border-top: 1px solid #e2e6ec;
+    font-size: 15px; color: #78829a;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0e1118; color: #f6f7f9; }
+    p { color: #98a2b8; }
+    .hint { border-color: #262c39; color: #78829a; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <!-- Схематичная рука в позе покоя: сложена, как её и оставляют на ночь. -->
+  <svg class="arm" viewBox="0 0 64 64" fill="none" stroke="currentColor"
+       stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M10 54h44"/>
+    <path d="M22 54v-8"/>
+    <path d="M22 46l14-9"/>
+    <path d="M36 37l10 5"/>
+    <circle cx="22" cy="46" r="3.5" fill="currentColor" stroke="none"/>
+    <circle cx="36" cy="37" r="3.5" fill="currentColor" stroke="none"/>
+  </svg>
+
+  <h1>Стенд сейчас выключен</h1>
+  <p>Роботом можно управлять, только когда он включён и рядом есть кто-то из команды.</p>
+  <p>Загляните позже — ссылка та же, ничего пересканировать не нужно.</p>
+
+  <p class="hint">С вашим телефоном всё в порядке: страница открылась, значит связь есть.</p>
+</main>
+</body>
+</html>
