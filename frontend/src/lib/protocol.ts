@@ -92,9 +92,14 @@ export function withConfigDefaults(raw: Partial<AppConfig>): AppConfig {
     max_msg_per_sec: raw.max_msg_per_sec ?? CONFIG_DEFAULTS.max_msg_per_sec,
     max_queue: raw.max_queue ?? CONFIG_DEFAULTS.max_queue,
     video_url: raw.video_url ?? '/video/stream',
+    // Оба флага по умолчанию ВЫКЛЮЧЕНЫ, и это не осторожность вообще.
+    // Умолчание срабатывает ровно тогда, когда шлюз поля не прислал, — то
+    // есть когда мы не знаем, есть ли за ним что-нибудь. Лишняя вкладка
+    // «Камера» на поток, который ретранслятор отдаёт кодом 404, хуже, чем
+    // её отсутствие: посетитель решит, что сломано.
     features: {
       cartesian: raw.features?.cartesian ?? false,
-      video: raw.features?.video ?? true,
+      video: raw.features?.video ?? false,
     },
   };
 }

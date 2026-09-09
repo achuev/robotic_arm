@@ -139,8 +139,10 @@ def test_config_shape_matches_contract(client, config):
     assert body["max_queue"] == 20
     assert body["video_url"] == "/video/stream"
     assert body["ee_jog_step_m"] == pytest.approx(0.01)
-    # На стенде декартов режим выключен: см. Config.feature_cartesian.
-    assert body["features"] == {"cartesian": False, "video": True}
+    # На стенде выключены оба: декартов режим (см. Config.feature_cartesian)
+    # и камера (Config.feature_video — картинку показывает экран у стенда,
+    # а в сайте её заменяет 3D-модель).
+    assert body["features"] == {"cartesian": False, "video": False}
 
 
 def test_config_joints_come_in_canonical_order_with_limits(client):

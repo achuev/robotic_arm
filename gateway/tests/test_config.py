@@ -64,13 +64,13 @@ def test_values_are_read_from_environment(monkeypatch):
     monkeypatch.setenv("MAX_QUEUE", "5")
     monkeypatch.setenv("PORT", "9000")
     monkeypatch.setenv("MAX_VEL_RAD_S", "0.4")
-    monkeypatch.setenv("FEATURE_VIDEO", "no")
+    monkeypatch.setenv("FEATURE_VIDEO", "yes")
     cfg = load_config()
     assert cfg.control_duration == 45.0
     assert cfg.max_queue == 5
     assert cfg.port == 9000
     assert cfg.max_vel_rad_s == 0.4
-    assert cfg.feature_video is False
+    assert cfg.feature_video is True
 
 
 def test_workspace_range_is_parsed(monkeypatch):

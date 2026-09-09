@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clamp, parseServerMessage } from './protocol';
+import { clamp, parseServerMessage, withConfigDefaults } from './protocol';
 
 describe('разбор кадров WebSocket', () => {
   it('пропускает все типы из контракта', () => {
@@ -36,5 +36,25 @@ describe('clamp', () => {
   });
   it('NaN не утекает в протокол', () => {
     expect(clamp(NaN, -1, 1)).toBe(-1);
+  });
+});
+
+describe('умолчания конфига', () => {
+  it('без features камера считается выключенной', () => {
+    // Поля нет — значит неизвестно, есть ли поток. Показать вкладку на
+    // несуществующее видео хуже, чем не показать: снаружи /video/* закрыт.
+    expect(withConfigDefaults({}).features.video).toBe(false);
+    expect(withConfigDefaults({}).features.cartesian).toBe(false);
+  });
+
+  it('явное значение сильнее умолчания', () => {
+    const cfg = withConfigDefaults({ features: { cartesian: false, video: true } });
+    expect(cfg.features.video).toBe(true);
+  });
+
+  it('адрес потока отдаётся всегда — смотреть надо на features', () => {
+    // video_url не признак доступности: шлюз отдаёт его и с выключенной
+    // камерой, а закрывает поток ретранслятор.
+    expect(withConfigDefaults({}).video_url).toBe('/video/stream');
   });
 });

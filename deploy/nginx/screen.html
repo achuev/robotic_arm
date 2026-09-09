@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>SO-101 · экран у стенда</title>
+<style>
+  /* Отдельный экран рядом с рукой: ноутбук или монитор в зале. Показывает
+     то, что посетитель и так видит вживую, — но крупно и с той стороны, с
+     которой рука выглядит понятнее.
+
+     Наружу эта страница не выходит (ретранслятор отдаёт на неё 404): поток
+     идёт только по локальной сети, где он ничего не стоит. */
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  #wait {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: #6b7280; font: 400 18px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  #wait[hidden] { display: none; }
+</style>
+<img id="v" alt="">
+<div id="wait">Жду картинку с камеры…</div>
+<script>
+  // MJPEG-поток рано или поздно обрывается: перезапуск камеры, моргнувшая
+  // сеть. Экран в зале никто не сторожит, поэтому он переподключается сам,
+  // а меняющийся ?r= не даёт браузеру отдать оборванный поток из кэша.
+  const img = document.getElementById('v');
+  const wait = document.getElementById('wait');
+  let n = 0;
+  function connect() {
+    img.src = '/video/stream?r=' + (n++);
+  }
+  img.onload = () => { wait.hidden = true; };
+  img.onerror = () => { wait.hidden = false; setTimeout(connect, 3000); };
+
+  // Подстраховка на случай, когда кадры не пошли вообще, а ошибки не было:
+  // камера ещё поднимается, поток открылся пустым. Зависший поток так не
+  // поймать — в <img> остаётся последний кадр, и отличить его от живого
+  // изнутри страницы нельзя. Для этого случая ниже отдельный таймер.
+  setInterval(() => {
+    if (img.naturalHeight === 0) { wait.hidden = false; connect(); }
+  }, 15000);
+
+  // Экран в зале работает часами без присмотра, поэтому раз в десять минут
+  // поток переоткрывается принудительно. Стоит это одного пропущенного
+  // кадра и снимает целый класс «картинка застыла, никто не заметил».
+  setInterval(connect, 600000);
+
+  connect();
+</script>

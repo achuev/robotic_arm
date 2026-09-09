@@ -138,6 +138,9 @@ services:
       ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
       ROBOT_BACKEND: ros2
       ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin-token}
+      # Камера в сайте — как на стенде, выключена. Чтобы проверить её здесь:
+      # FEATURE_VIDEO=1 docker compose -f deploy/compose.dev.yml up -d gateway
+      FEATURE_VIDEO: ${FEATURE_VIDEO:-0}
       # Умолчания зоны живут в config.py вместе с обоснованием; здесь их
       # переопределять не нужно. Раскомментируйте, только если стенд стоит
       # иначе (ближе к стене, выше стол).
@@ -276,6 +279,12 @@ services:
     volumes:
       - ./nginx/so101.conf:/etc/nginx/templates/default.conf.template:ro
       - ../frontend/dist:/usr/share/nginx/html:ro
+      # Экран у стенда: http://<ip>:8080/screen/ — видео во весь экран.
+      # Лежит РЯДОМ с каталогом сайта, а не внутри: тот подключён только для
+      # чтения, и создать в нём точку монтирования нельзя. Раздаётся своей
+      # location в so101.conf. Наружу не выходит — ретранслятор отдаёт на
+      # /screen/* и /video/* 404.
+      - ./nginx/screen.html:/usr/share/nginx/screen/index.html:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]
       interval: 15s

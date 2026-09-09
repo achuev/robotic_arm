@@ -150,7 +150,17 @@ class Config:
     # --- прочее ---
     urdf_path: str = field(default_factory=default_urdf_path)
     video_url: str = "/video/stream"
-    feature_video: bool = True
+    #: Камера в сайте. Выключена: на стенде картинку показывает отдельный
+    #: экран рядом с рукой, а посетителю в сайте её заменяет 3D-модель —
+    #: она рисуется по тем же joint_states и стоит почти ничего.
+    #:
+    #: Дело не в экономии ради экономии. MJPEG отдаётся КАЖДОМУ смотрящему
+    #: своим потоком, 2.9 Мбит/с на человека, и все они уходят через
+    #: исходящий канал зала. Если этот канал — сотовый модем, видео съедает
+    #: его целиком и роняет то, ради чего стенд существует: управление.
+    #: Включается FEATURE_VIDEO=1, но перед этим стоит прочитать
+    #: docs/public-access.md.
+    feature_video: bool = False
     #: Декартов режим («точка»): джоггинг схвата по x/y/z через IK.
     #: Выключен: на демо-стенде он оказался лишним — прохожему понятнее
     #: слайдеры суставов, а IK тянет за собой отдельный контейнер и
@@ -224,7 +234,7 @@ def load_config(*, require_admin_token: bool = True) -> Config:
         ee_jog_step_m=_env_float("EE_JOG_STEP_M", 0.01),
         urdf_path=_env_str("URDF_PATH", default_urdf_path()),
         video_url=_env_str("VIDEO_URL", "/video/stream"),
-        feature_video=_env_bool("FEATURE_VIDEO", True),
+        feature_video=_env_bool("FEATURE_VIDEO", False),
         feature_cartesian=_env_bool("FEATURE_CARTESIAN", False),
         attract_enabled=_env_bool("ATTRACT_ENABLED", True),
         attract_after_sec=_env_float("ATTRACT_AFTER_SEC", 120.0),

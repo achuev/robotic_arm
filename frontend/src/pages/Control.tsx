@@ -37,8 +37,9 @@ type View = 'camera' | 'model';
 export function Control() {
   const { boot, state, cm } = useGateway();
   const [tab, setTab] = useState<Tab>('joints');
-  // Камера по умолчанию: настоящая рука убедительнее модели, а тем, у кого
-  // видео не поднялось, модель остаётся вторым способом увидеть движение.
+  // Камера по умолчанию — но только если она вообще предусмотрена: настоящая
+  // рука убедительнее модели. На стенде она выключена (features.video), и
+  // тогда переключаться не из чего: модель занимает весь верх, вкладок нет.
   const [view, setView] = useState<View>('camera');
 
   const controlling = state.phase === 'controlling';
@@ -48,6 +49,9 @@ export function Control() {
 
   const config = boot.status === 'ready' ? boot.config : null;
   const cartesian = config?.features.cartesian === true;
+  // Пока конфиг не пришёл, камеры нет: иначе на секунду мигнёт пустая
+  // рамка потока, которого не будет.
+  const videoEnabled = config?.features.video === true;
   const stalled = isMotionStalled(
     state,
     now,
@@ -151,25 +155,24 @@ export function Control() {
         </div>
       </header>
 
-      {view === 'camera' ? (
-        <VideoStream
-          src={config ? videoUrl(config) : null}
-          enabled={config?.features.video !== false}
-        />
+      {videoEnabled && view === 'camera' ? (
+        <VideoStream src={config ? videoUrl(config) : null} enabled />
       ) : (
         <ArmView3D joints={state.joints} />
       )}
 
-      <div className="safe-x pt-2">
-        <div className="grid grid-cols-2 gap-2 rounded-2xl bg-ink-100 p-1 dark:bg-ink-900">
-          <TabButton active={view === 'camera'} onClick={() => setView('camera')}>
-            Камера
-          </TabButton>
-          <TabButton active={view === 'model'} onClick={() => setView('model')}>
-            Модель
-          </TabButton>
+      {videoEnabled && (
+        <div className="safe-x pt-2">
+          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-ink-100 p-1 dark:bg-ink-900">
+            <TabButton active={view === 'camera'} onClick={() => setView('camera')}>
+              Камера
+            </TabButton>
+            <TabButton active={view === 'model'} onClick={() => setView('model')}>
+              Модель
+            </TabButton>
+          </div>
         </div>
-      </div>
+      )}
 
       <main className="safe-x flex-1">
         {state.phase === 'observer' && (
