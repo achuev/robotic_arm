@@ -1,0 +1,75 @@
+# joint_config_file для feetech_ros2_driver — калибровка ЭТОЙ руки.
+#
+# Сгенерировано deploy/lerobot_calib_to_yaml.py из stand.json
+# Руками не править: перекалибровали — перегенерируйте.
+#
+# Драйвер ЗАПИСЫВАЕТ эти значения в EEPROM сервоприводов при старте.
+joints:
+  shoulder_pan:
+    id: 1
+    homing_offset: -208
+    range_min: 778
+    range_max: 3432
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    acceleration: 254
+
+  shoulder_lift:
+    id: 2
+    homing_offset: 779
+    range_min: 783
+    range_max: 3300
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    acceleration: 254
+
+  elbow_flex:
+    id: 3
+    homing_offset: 996
+    range_min: 850
+    range_max: 3036
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    acceleration: 254
+
+  wrist_flex:
+    id: 4
+    homing_offset: -254
+    range_min: 875
+    range_max: 3175
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    acceleration: 254
+
+  wrist_roll:
+    id: 5
+    homing_offset: 361
+    range_min: 0
+    range_max: 4095
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    acceleration: 254
+
+  gripper:
+    id: 6
+    homing_offset: 1479
+    range_min: 2038
+    range_max: 3520
+    p_coefficient: 16
+    i_coefficient: 0
+    d_coefficient: 32
+    return_delay_time: 0
+    acceleration: 254
+    max_torque_limit: 500
+    protection_current: 250
+    overload_torque: 25

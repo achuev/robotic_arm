@@ -1,0 +1,27 @@
+# Шлюз «веб ↔ ROS».
+#
+# База — образ руки: в нём уже лежат rclpy и сгенерированные типы
+# so101_kinematics_msgs, которых нет ни в одном публичном колесе. Собирать их
+# заново ради отдельного тонкого образа значило бы держать вторую сборку тех же
+# сообщений и ловить рассинхрон типов на ровном месте.
+FROM so101-ros:dev
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# uvloop/httptools ощутимо экономят процессор на 50 Гц публикации команд.
+RUN pip install --break-system-packages --no-cache-dir \
+      "fastapi>=0.110" "uvicorn[standard]>=0.29" "websockets>=12"
+
+COPY . /opt/gateway
+RUN pip install --break-system-packages --no-cache-dir --no-deps -e /opt/gateway
+
+ENV ROBOT_BACKEND=ros2 \
+    PORT=8081 \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 8081
+
+# Через /entrypoint.sh — ему нужен ROS-оверлей, иначе rclpy не найдёт типы.
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["python3", "-m", "uvicorn", "so101_gateway.app:create_app", \
+     "--factory", "--host", "0.0.0.0", "--port", "8081"]

@@ -1,0 +1,25 @@
+# venv шлюза (создаётся локально, в репозиторий не едет)
+.venv/
+venv/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ROS / colcon
+install/
+log/
+
+# редакторы
+.vscode/
+.idea/
+.DS_Store

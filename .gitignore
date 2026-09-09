@@ -1,0 +1,27 @@
+# Окружения. Ставятся по docs/setup-linux.md, в репозиторий не кладутся.
+.venv/
+tools/.venv-lerobot/
+tools/.venv-mesh/
+node_modules/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# Сборка фронтенда: nginx раздаёт её с диска, пересобирается одной командой.
+frontend/dist/
+
+# Промежуточное состояние калибровки. Результат — в EEPROM приводов и в
+# deploy/so101_follower_joints.yaml, а это рабочий файл процесса.
+deploy/.calibration-state.json
+
+# Локальные артефакты
+*.pdf
+*.log
+
+# ЧТО ВЕРСИОНИРУЕТСЯ НАМЕРЕННО, хотя и генерируется:
+#   deploy/so101_follower_joints.yaml   калибровка ЭТОЙ руки
+#   deploy/so101_follower.generated.urdf  из него берутся пределы суставов
+#   frontend/public/arm.glb             модель для сайта
+#   frontend/src/lib/armChain.ts        кинематика для 3D-вида
+# Первые два невоспроизводимы без самой руки, вторые два — без ROS-образа
+# и mesh-окружения. Собирать их при каждом развёртывании дороже, чем хранить.

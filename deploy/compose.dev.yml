@@ -1,0 +1,259 @@
+# Стенд разработки для SO-101: mock-рука, электроника не нужна.
+#
+#   cd frontend && npm run build && cd ..     # nginx раздаёт frontend/dist
+#   docker compose -f deploy/compose.dev.yml build
+#   docker compose -f deploy/compose.dev.yml up -d
+#   open http://localhost:8080/
+#
+# ── ОДИН АДРЕС ────────────────────────────────────────────────────────────
+# http://localhost:8080 — это nginx (сервис `web`), и он же единственный порт,
+# который вообще нужен посетителю: сайт, /api, /ws и /video/stream раздаются
+# с одного origin. Vite для показа стенда больше не нужен (он остаётся для
+# разработки фронтенда: `npm run dev` проксирует на этот же 8080).
+# Прямые порты шлюза и видео вынесены на 18080/18081 — только для отладки,
+# в compose.prod.yml их нет.
+#
+# Инструменты на этой машине: Docker Engine 20.10.21 + Compose v2.13
+# (`docker compose` и шим `docker-compose` — оба v2), поэтому файл в формате
+# Compose Spec: без ключа `version:`, `build.context` может смотреть наружу.
+#
+# ── СЕТЬ ──────────────────────────────────────────────────────────────────
+# `network_mode: host` не работает в Docker Desktop под macOS: «хостом» там
+# оказывается скрытая виртуальная машина LinuxKit, а не сам macOS. Поэтому
+# порты пробрасываются явно, и это работает и на macOS, и на Linux.
+#
+# ── РАЗДЕЛЯЕМАЯ ПАМЯТЬ (не удалять) ───────────────────────────────────────
+# FastDDS на одной машине по умолчанию возит данные через разделяемую память.
+# Общего сетевого пространства для этого НЕДОСТАТОЧНО: контейнеры должны делить
+# ещё и `/dev/shm`. Без этого получается коварная картина — подписчики на топике
+# числятся, а данные не идут вообще, и `ros2 node list` не показывает чужие ноды.
+# Донор объявляется как `ipc: shareable`, остальные входят через `ipc: service:ros`.
+
+name: so101-demo
+
+services:
+
+  # ── рука (ros2_control в режиме mock) ────────────────────────────────
+  ros:
+    build:
+      context: ../upstream
+      dockerfile: ../deploy/Dockerfile.ros
+      args:
+        WITH_IK: "1"          # 0 — собрать без robokin/placo, образ заметно меньше
+    image: so101-ros:dev
+    container_name: so101-ros
+    init: true
+    stop_grace_period: 10s
+    ipc: shareable            # донор /dev/shm, см. врезку выше
+
+    environment:
+      ROS_DOMAIN_ID: "0"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      # Обнаружение только по локальной петле: не переговариваемся с чужими
+      # машинами в сети. ROS_LOCALHOST_ONLY не ставить — в Jazzy он объявлен
+      # устаревшим и молча перебивает эту настройку.
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+
+    # Порты объявляются ТОЛЬКО здесь: остальные сервисы входят в это же
+    # сетевое пространство и своих `ports:` иметь не могут.
+    # Наружу посетителю нужен только nginx (сервис `web`, порт 8080).
+    # Эти два — отладочные, «мимо nginx», и существуют только в dev.
+    ports:
+      - "127.0.0.1:18080:8080"   # шлюз напрямую (REST + WebSocket)
+      - "127.0.0.1:18081:8081"   # web_video_server напрямую, MJPEG
+
+    command:
+      - ros2
+      - launch
+      - so101_bringup
+      - follower.launch.py
+      - hardware_type:=mock
+      - use_rviz:=false
+
+    healthcheck:
+      # Рука «здорова», когда joint_state_broadcaster начал публиковать.
+      # Обязательно через /entrypoint.sh: healthcheck исполняется в /bin/sh,
+      # где нет встроенного `source`, и оверлей ROS иначе не подхватится.
+      test: ["CMD", "/entrypoint.sh", "timeout", "10",
+             "ros2", "topic", "echo", "/follower/joint_states", "--once"]
+      interval: 15s
+      timeout: 20s
+      retries: 5
+      start_period: 30s
+
+  # ── IK-нода апстрима ─────────────────────────────────────────────────
+  # Подмена cmd_topic — главное архитектурное правило проекта: решение IK не
+  # идёт в руку напрямую, его подхватывает шлюз и пропускает через клэмп и
+  # ограничитель скорости. У топика команд ровно один издатель.
+  #
+  # Старт занимает ~10 с (загрузка модели placo) при запечённом кэше описаний.
+  ik:
+    image: so101-ros:dev
+    container_name: so101-ik
+    depends_on:
+      ros:
+        condition: service_healthy
+    network_mode: "service:ros"
+    ipc: "service:ros"
+    environment:
+      ROS_DOMAIN_ID: "0"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    command:
+      - ros2
+      - run
+      - so101_kinematics
+      - cartesian_motion_node
+      - --ros-args
+      - -p
+      - cmd_topic:=/web/ik_cmd
+      - -p
+      - base_frame:=base_link   # настоящие кадры TF идут без префикса
+
+  # ── шлюз «веб ↔ ROS» ─────────────────────────────────────────────────
+  gateway:
+    build:
+      context: ../gateway
+      dockerfile: ../deploy/Dockerfile.gateway
+    image: so101-gateway:dev
+    container_name: so101-gateway
+    depends_on:
+      ros:
+        condition: service_healthy
+    network_mode: "service:ros"
+    ipc: "service:ros"
+    environment:
+      ROS_DOMAIN_ID: "0"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+      ROBOT_BACKEND: ros2
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin-token}
+      # Умолчания зоны живут в config.py вместе с обоснованием; здесь их
+      # переопределять не нужно. Раскомментируйте, только если стенд стоит
+      # иначе (ближе к стене, выше стол).
+      # WORKSPACE_X: "0.15,0.38"
+      # WORKSPACE_Y: "-0.20,0.20"
+      # WORKSPACE_Z: "0.08,0.36"
+    command:
+      - python3
+      - -m
+      - uvicorn
+      - so101_gateway.app:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  # ── источник кадров ──────────────────────────────────────────────────
+  # Камеры на стенде ещё нет, поэтому топик наполняет свой узел
+  # (deploy/video/demo_camera.py): синтетический кадр с бегущей развёрткой
+  # и живыми углами суставов, прочитанными из /follower/joint_states ПО ИМЕНИ.
+  #
+  # Топик специально называется так же, как его назвала бы настоящая камера
+  # апстрима (`cameras.launch.py` + config/cameras/so101_cameras.yaml:
+  # namespace `static_camera`, узел `cam_overhead`) → /static_camera/image_raw.
+  # Благодаря этому переход на железо не трогает ни nginx, ни фронтенд.
+  #
+  # НАСТОЯЩАЯ КАМЕРА — раскомментировать `devices` и подставить source:
+  #     source:=/dev/video0            # или /dev/cam_overhead после udev-правила
+  # Работает на Linux; в Docker Desktop под macOS камеру в контейнер не
+  # пробросить в принципе — там остаются синтетика и ролик.
+  # Зацикленный ролик вместо синтетики:
+  #     положить файл в deploy/video/ и указать source:=/opt/video/loop.mp4
+  camera:
+    image: so101-ros:dev
+    container_name: so101-camera
+    depends_on:
+      ros:
+        condition: service_healthy
+    network_mode: "service:ros"
+    ipc: "service:ros"
+    restart: unless-stopped
+    environment:
+      ROS_DOMAIN_ID: "0"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    volumes:
+      - ./video:/opt/video:ro
+    # devices:
+    #   - "/dev/video0:/dev/video0"
+    command:
+      - python3
+      - /opt/video/demo_camera.py
+      - --ros-args
+      - -r
+      - __ns:=/static_camera          # → /static_camera/image_raw
+      - -p
+      - source:=""                    # "" синтетика | /opt/video/loop.mp4 | /dev/video0
+      - -p
+      - fps:=15.0
+
+  # ── MJPEG-мост ───────────────────────────────────────────────────────
+  # Пакет уже стоит в so101-ros:dev (apt, см. Dockerfile.ros). Порт 8081:
+  # по умолчанию web_video_server слушает 8080 и подрался бы со шлюзом —
+  # они делят одно сетевое пространство.
+  video:
+    image: so101-ros:dev
+    container_name: so101-video
+    depends_on:
+      ros:
+        condition: service_healthy
+    network_mode: "service:ros"
+    ipc: "service:ros"
+    restart: unless-stopped
+    environment:
+      ROS_DOMAIN_ID: "0"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    command:
+      - ros2
+      - run
+      - web_video_server
+      - web_video_server
+      - --ros-args
+      - -p
+      - port:=8081
+      - -p
+      - address:=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null",
+             "http://localhost:8081/snapshot?topic=/static_camera/image_raw"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ── nginx: сайт + вся маршрутизация ──────────────────────────────────
+  # ЕДИНСТВЕННЫЙ сервис с портом наружу. В сетевое пространство ROS он
+  # намеренно НЕ входит: графа ROS ему не нужно, а собственная сеть даёт
+  # ему право иметь свой `ports:`. До шлюза и видео он дотягивается по
+  # имени сервиса `ros` — они оба живут в его namespace.
+  #
+  # frontend/dist монтируется, а не копируется в образ: на стенде репозиторий
+  # всё равно лежит рядом, а пересборка фронтенда не требует пересборки образа.
+  # depends_on намеренно НЕТ. Сайт должен открываться, даже когда рука не
+  # поднялась: посетитель увидит страницу с честным «робот недоступен», а не
+  # «соединение отклонено». nginx резолвит `ros` в момент запроса, поэтому
+  # спокойно стартует раньше него и отдаёт 502 только на /api, /ws и /video.
+  web:
+    image: nginx:1.27-alpine
+    container_name: so101-web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/so101.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../frontend/dist:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

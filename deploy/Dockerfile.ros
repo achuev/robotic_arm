@@ -1,0 +1,198 @@
+# SO-101 ROS 2 (Jazzy) image for the web-controlled demo stand.
+#
+# BUILD CONTEXT = ./upstream  (NOT the repo root) so that churn in
+# ./gateway and ./frontend does not invalidate the layer cache.
+#
+#   docker build -f deploy/Dockerfile.ros -t so101-ros:dev ./upstream
+#   # or:  docker compose -f deploy/compose.dev.yml build
+#
+# Written in plain Dockerfile syntax (no `RUN --mount=`) so it builds on the
+# classic builder of Docker 20.10 as well as with BuildKit.
+FROM ros:jazzy-ros-base
+
+SHELL ["/bin/bash", "-lc"]
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV ROS_DISTRO=jazzy
+ENV ROS_WS=/ros2_ws
+# Robot description used by robokin/placo is pinned upstream to this commit.
+ENV ROBOT_DESCRIPTION_COMMIT=385e8d7c68e24945df6c60d9bd68837a4b7411ae
+
+# Set to 0 to skip the whole robokin/placo IK layer (smaller, faster image).
+ARG WITH_IK=1
+# Set to 0 to skip baking the ~333 MB SO-ARM100 description cache that
+# robokin downloads at runtime. With 0 the IK node needs network on first
+# start and takes ~60 s extra to come up.
+ARG WARM_IK_CACHE=1
+
+# --------------------------------------------------------------------------
+# 1. Base tooling
+# --------------------------------------------------------------------------
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      git \
+      ca-certificates \
+      python3-pip \
+      vim-tiny \
+      less \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR ${ROS_WS}
+
+# --------------------------------------------------------------------------
+# 2. Sources
+# --------------------------------------------------------------------------
+COPY . ${ROS_WS}/src/so101-ros-physical-ai
+
+# --------------------------------------------------------------------------
+# 3. rosdep
+#
+# The full workspace pulls MoveIt, RViz, RealSense, gscam, camera_ros, ... —
+# several GB we do not need for a headless mock/web stand.  We therefore
+# resolve rosdeps only for the four packages we actually build, and skip the
+# camera / GUI exec_depends that so101_bringup and so101_description declare.
+#
+# `rosdep check` over the *whole* workspace is still run (non-fatal, BEFORE
+# the install, so it is a snapshot of everything the full workspace would
+# need) and stored at /ros2_ws/rosdep-full-check.txt for reference.
+# --------------------------------------------------------------------------
+ENV ROSDEP_SKIP_KEYS="usb_cam realsense2_camera gscam camera_ros rviz2 joint_state_publisher_gui"
+
+RUN apt-get update \
+ && rosdep update --rosdistro ${ROS_DISTRO} \
+ && (rosdep check --from-paths src --ignore-src --rosdistro ${ROS_DISTRO} \
+        > ${ROS_WS}/rosdep-full-check.txt 2>&1 || true) \
+ && rosdep install -y -r --ignore-src --rosdistro ${ROS_DISTRO} \
+      --skip-keys "${ROSDEP_SKIP_KEYS}" \
+      --from-paths \
+        src/so101-ros-physical-ai/so101_description \
+        src/so101-ros-physical-ai/so101_bringup \
+        src/so101-ros-physical-ai/so101_kinematics_msgs \
+        src/so101-ros-physical-ai/so101_kinematics \
+        src/so101-ros-physical-ai/feetech_ros2_driver \
+ && rm -rf /var/lib/apt/lists/*
+
+# --------------------------------------------------------------------------
+# 4. Packages rosdep does NOT give us (undeclared / project-specific)
+#
+#   forward-command-controller : follower.launch.py defaults to
+#                                arm_controller:=forward_controller, whose
+#                                type is forward_command_controller/
+#                                ForwardCommandController.  It is NOT in any
+#                                package.xml -> mock arm fails to spawn
+#                                without it.
+#   ros2controlcli             : provides the `ros2 control ...` CLI verb.
+#   tf-transformations         : imported by so101_kinematics/
+#                                cartesian_motion_node.py but not declared.
+#   web-video-server           : MJPEG bridge for the mobile frontend.
+#   python3-scipy              : apt build linked against numpy 1.26 (see the
+#                                numpy note in the IK stage below).
+# --------------------------------------------------------------------------
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-forward-command-controller \
+      ros-${ROS_DISTRO}-ros2controlcli \
+      ros-${ROS_DISTRO}-tf-transformations \
+      ros-${ROS_DISTRO}-web-video-server \
+      python3-scipy \
+ && rm -rf /var/lib/apt/lists/*
+
+# --------------------------------------------------------------------------
+# 4b. Патч драйвера Feetech: таймаут чтения 5 мс → 50 мс.
+#
+# ПОЧЕМУ. При старте драйвер записывает параметры всех шести сервоприводов
+# (p/i/d, ускорение, задержка ответа, а у схвата ещё три величины защиты).
+# Это записи в EEPROM, и после серии таких записей сервопривод отвечает не
+# сразу — он ещё дописывает предыдущее значение. Драйвер ждёт ответа 5 мс,
+# не дожидается и валит инициализацию:
+#
+#   configure_joints_ -> check_head -> SerialPort::read_exact [Read timeout]
+#
+# Падало стабильно на последнем параметре схвата (protection_current), то
+# есть после ~35 записей подряд. Замерено: круговая задержка на свободной
+# шине 0.3 мс, так что 50 мс — это запас в 160 раз, а в нормальном режиме
+# таймаут вообще не достигается и на скорость обмена не влияет.
+# С 50 мс полная последовательность проходит; с 5 мс не проходила ни разу.
+#
+# Патч применяется здесь, а не правкой сабмодуля: upstream/ остаётся
+# нетронутым. Если апстрим сам починит таймаут, сборка упадёт на проверке
+# ниже — и это правильно, значит патч пора убирать.
+# --------------------------------------------------------------------------
+RUN set -e; \
+    f=src/so101-ros-physical-ai/feetech_ros2_driver/feetech_driver/include/feetech_driver/serial_port.hpp; \
+    grep -q 'std::chrono::milliseconds(5)' "$f" \
+      || { echo "ПАТЧ ТАЙМАУТА НЕ ПРИМЕНЁН: в $f больше нет milliseconds(5)"; exit 1; }; \
+    sed -i 's/std::chrono::milliseconds(5)/std::chrono::milliseconds(50)/' "$f"; \
+    grep -n 'timeout_ = ' "$f"
+
+# --------------------------------------------------------------------------
+# 5. Build only what the web stand needs.
+#
+# feetech_ros2_driver СОБИРАЕТСЯ, хотя нужен только на железе: без него
+# `hardware_type:=real` падает на загрузке плагина —
+#   LibraryLoadException: class feetech_ros2_driver/FeetechHardwareInterface
+#   does not exist. Declared types are  mock_components/GenericSystem
+# то есть compose.prod.yml в его нынешнем виде не поднялся бы вообще. Сборка
+# стоит 14 с и тянет из apt только libserial-dev / range-v3 / tl-expected.
+#
+# Deliberately NOT built: episode_recorder, rosbag_to_lerobot,
+# so101_inference, policy_server, so101_teleop, so101_moveit_config,
+# so101_camera_calibration.
+# --------------------------------------------------------------------------
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
+ && colcon build --symlink-install \
+      --packages-up-to so101_bringup so101_kinematics feetech_ros2_driver
+
+# --------------------------------------------------------------------------
+# 6. IK stack (robokin + placo)
+#
+# robokin is NOT on PyPI — it is the upstream author's package and must be
+# installed from GitHub.  Two traps:
+#   a) pip cannot uninstall the Debian-managed psutil -> --ignore-installed
+#   b) robokin pulls numpy 2.x + scipy 1.18, which break ROS's transforms3d
+#      (`np.maximum_sctype` removed in numpy 2).  We therefore drop the pip
+#      numpy/scipy again and fall back to the apt numpy 1.26 / scipy 1.11,
+#      which placo, pin and robokin all work with.
+# --------------------------------------------------------------------------
+RUN if [ "${WITH_IK}" = "1" ]; then \
+      pip install --break-system-packages --no-cache-dir \
+        --ignore-installed psutil \
+        "robokin[placo] @ git+https://github.com/legalaspro/robokin.git" \
+      && pip uninstall -y --break-system-packages numpy scipy \
+      && python3 -c "import numpy, scipy, placo, robokin; \
+print('numpy', numpy.__version__, 'scipy', scipy.__version__, 'placo OK, robokin OK')" ; \
+    else echo "WITH_IK=0 -> skipping robokin/placo"; fi
+
+# Pre-download the SO-ARM100 description robokin resolves at runtime.
+# NOTE: do not prune this cache — robot_descriptions re-clones the whole
+# repository if .git or any tracked file is missing.
+RUN if [ "${WITH_IK}" = "1" ] && [ "${WARM_IK_CACHE}" = "1" ]; then \
+      python3 -c "from robokin.robot_model import load_robot_description as l; print(l().urdf_path)" ; \
+    else echo "skipping robot_descriptions warm-up"; fi
+
+# --------------------------------------------------------------------------
+# 7. Entrypoint
+#
+# Generated inline rather than COPY'd, because the build context is
+# ./upstream and deploy/ is outside it.
+# --------------------------------------------------------------------------
+RUN printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -e' \
+  'source /opt/ros/jazzy/setup.bash' \
+  'if [ -f /ros2_ws/install/setup.bash ]; then' \
+  '  source /ros2_ws/install/setup.bash' \
+  'fi' \
+  'exec "$@"' \
+  > /entrypoint.sh \
+ && chmod +x /entrypoint.sh
+
+# Make interactive `docker exec ... bash -l` sourced too.
+RUN printf '%s\n' \
+  'source /opt/ros/jazzy/setup.bash' \
+  '[ -f /ros2_ws/install/setup.bash ] && source /ros2_ws/install/setup.bash' \
+  > /etc/profile.d/10-ros-overlay.sh
+
+WORKDIR ${ROS_WS}
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["bash"]

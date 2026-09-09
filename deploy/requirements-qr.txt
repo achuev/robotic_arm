@@ -1,0 +1,10 @@
+# Инструменты стенда, запускаемые человеком с ноутбука (не рантайм).
+#   python3 -m venv deploy/.venv
+#   deploy/.venv/bin/pip install -r deploy/requirements-qr.txt
+
+# deploy/qr.py — табличка с QR на печать
+qrcode==8.0
+pillow==11.0.0
+
+# deploy/servo_scan.py — сканер шины сервоприводов
+pyserial==3.5

@@ -1,0 +1,56 @@
+# Автозапуск демо-стенда SO-101 при включении машины.
+#
+# Установка (стенд на Linux, репозиторий лежит в /opt/so101):
+#
+#   sudo install -m 600 /dev/null /etc/so101.env
+#   sudo sh -c 'echo ADMIN_TOKEN=$(openssl rand -hex 24) >> /etc/so101.env'
+#   sudo cp /opt/so101/deploy/so101-stand.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now so101-stand
+#
+# Состояние и логи:
+#   systemctl status so101-stand
+#   journalctl -u so101-stand -f          # только запуск/остановка стека
+#   docker compose -f /opt/so101/deploy/compose.prod.yml logs -f   # сами сервисы
+#
+# Юнит намеренно ничего не собирает: и образы, и frontend/dist готовятся
+# руками при выкладке. Стенд, который решил пересобрать фронтенд в момент
+# включения питания, — это стенд, который не открылся к началу мероприятия.
+
+[Unit]
+Description=SO-101 demo stand (docker compose)
+Documentation=file:///opt/so101/docs/runbook.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/so101
+
+# ADMIN_TOKEN обязателен (compose.prod.yml не поднимется без него).
+# TUNNEL_TOKEN нужен, только если стенд публикуется наружу; без профиля
+# `tunnel` он не читается.
+EnvironmentFile=/etc/so101.env
+
+# Проверка перед стартом: без собранного фронтенда nginx поднимется и будет
+# честно отдавать 404 — на стенде это выглядит как «сайт умер», хотя робот жив.
+ExecStartPre=/bin/test -f /opt/so101/frontend/dist/index.html
+
+ExecStart=/usr/bin/docker compose -f /opt/so101/deploy/compose.prod.yml up -d --remove-orphans
+ExecStop=/usr/bin/docker compose -f /opt/so101/deploy/compose.prod.yml down
+
+# `up -d` ждёт healthcheck-ов руки и шлюза; на холодной машине к этому
+# добавляется старт самого docker и инициализация сервоприводов.
+TimeoutStartSec=900
+TimeoutStopSec=120
+
+# Перезапуск отдельных сервисов делает сам Docker (restart: unless-stopped).
+# Юнит поднимает стек ЦЕЛИКОМ — это важно: четыре контейнера живут в сетевом
+# пространстве контейнера `ros`, и поднимать их по одному нельзя.
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

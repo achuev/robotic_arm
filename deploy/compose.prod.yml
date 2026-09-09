@@ -1,0 +1,354 @@
+# Боевой стенд SO-101: настоящая рука, стенд стоит в зале, рядом табличка с QR.
+#
+#   cd frontend && npm run build && cd ..
+#   export ADMIN_TOKEN=$(openssl rand -hex 24)
+#   docker compose -f deploy/compose.prod.yml up -d
+#
+# Публичный доступ (осознанно, отдельным флагом):
+#   export TUNNEL_TOKEN=...                       # из панели Cloudflare
+#   docker compose -f deploy/compose.prod.yml --profile tunnel up -d
+#
+# Отличия от compose.dev.yml:
+#   * hardware_type:=real и проброс /dev/so101_follower;
+#   * наружу торчит ОДИН порт — nginx; отладочных 18080/18081 нет;
+#   * restart: unless-stopped и healthcheck у каждого сервиса;
+#   * ADMIN_TOKEN обязателен: стек не поднимется с умолчанием из dev;
+#   * ротация логов — стенд работает сутками, диск не бесконечный;
+#   * cloudflared спрятан за профилем `tunnel` и по умолчанию ВЫКЛЮЧЕН.
+#
+# Файл намеренно самостоятельный, а не оверлей к dev: оверлеем нельзя УБРАТЬ
+# проброшенные порты, а «в проде случайно остался отладочный порт наружу» —
+# именно та ошибка, ради которой всё это и разделено.
+#
+# ── ЧЕГО ЗДЕСЬ НЕТ И ПОЧЕМУ ───────────────────────────────────────────────
+# `network_mode: host`. На Linux-стенде он бы работал и был бы чуть проще, но
+# тогда nginx, шлюз и web_video_server делят порты с самой машиной. Явный
+# проброс одного порта честнее и одинаков с dev.
+#
+# ── ВАЖНО ПРО ПЕРЕЗАПУСК ──────────────────────────────────────────────────
+# Четыре сервиса живут В СЕТЕВОМ ПРОСТРАНСТВЕ контейнера `ros`. Docker так
+# устроен, что при пересоздании `ros` пространство исчезает вместе с ним, и
+# соседи остаются с мёртвым интерфейсом. Поэтому перезапускать надо СТЕК
+# целиком (`docker compose ... up -d --force-recreate`), а не один сервис.
+# Подробности и симптомы — в docs/runbook.md.
+
+name: so101-stand
+
+x-ros-env: &ros-env
+  ROS_DOMAIN_ID: "0"
+  RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+  # Обнаружение только по локальной петле: стенд не должен переговариваться
+  # с чужими ROS-нодами в гостевой сети зала.
+  ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  # ── рука: НАСТОЯЩЕЕ железо ────────────────────────────────────────────
+  ros:
+    build:
+      context: ../upstream
+      dockerfile: ../deploy/Dockerfile.ros
+      args:
+        WITH_IK: "1"
+    image: so101-ros:dev
+    container_name: so101-ros
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 10s
+    ipc: shareable            # донор /dev/shm для FastDDS, см. compose.dev.yml
+    logging: *logging
+
+    # Стабильное имя даёт udev-правило deploy/99-so101.rules; именно этот путь
+    # ждёт follower.launch.py (аргумент usb_port, значение по умолчанию).
+    # /dev/ttyACM0 сюда подставлять НЕ нужно: номер переезжает после
+    # передёргивания кабеля, и рука молча не поднимется.
+    devices:
+      - "/dev/so101_follower:/dev/so101_follower"
+
+    environment: *ros-env
+
+    # Единственный порт наружу — nginx (сервис web). Здесь портов нет
+    # намеренно: шлюз и видео доступны только изнутри.
+    ports: []
+
+    # Калибровка ЭТОЙ руки. Значения уже лежат в EEPROM сервоприводов, и рука
+    # поедет без файла — он нужен, чтобы калибровка пережила замену привода:
+    # драйвер перезаписывает ею EEPROM при каждом старте.
+    #
+    # Пересоздаётся после любой перекалибровки:
+    #   deploy/.venv/bin/python deploy/lerobot_calib_to_yaml.py \
+    #     ~/.cache/huggingface/lerobot/calibration/robots/so101_follower/stand.json
+    #
+    # НЕ подставлять сюда so101_bringup/config/hardware/follower_joints.yaml из
+    # апстрима: это калибровка чужой руки, своя рука уедет в упоры.
+    volumes:
+      - ./so101_follower_joints.yaml:/etc/so101/joints.yaml:ro
+
+    command:
+      - ros2
+      - launch
+      - so101_bringup
+      - follower.launch.py
+      - hardware_type:=real
+      - use_rviz:=false
+      # - usb_port:=/dev/so101_follower   # значение по умолчанию, менять не надо
+      - joint_config_file:=/etc/so101/joints.yaml   # см. volumes выше
+
+    healthcheck:
+      test: ["CMD", "/entrypoint.sh", "timeout", "10",
+             "ros2", "topic", "echo", "/follower/joint_states", "--once"]
+      interval: 15s
+      timeout: 20s
+      retries: 5
+      start_period: 60s      # железу на инициализацию сервоприводов нужно больше,
+                             # чем mock-у
+
+  # ── IK ────────────────────────────────────────────────────────────────
+  ik:
+    # Декартов режим («точка») с сайта убран — см. Config.feature_cartesian.
+    # IK-нода без него никому не нужна, поэтому спрятана за профилем:
+    #   docker compose -f deploy/compose.prod.yml --profile cartesian up -d
+    # Вместе с ней надо поднять и FEATURE_CARTESIAN=1 у шлюза.
+    profiles: ["cartesian"]
+    image: so101-ros:dev
+    container_name: so101-ik
+    depends_on:
+      ros:
+        condition: service_healthy
+    network_mode: "service:ros"
+    ipc: "service:ros"
+    restart: unless-stopped
+    logging: *logging
+    environment: *ros-env
+    command:
+      - ros2
+      - run
+      - so101_kinematics
+      - cartesian_motion_node
+      - --ros-args
+      - -p
+      - cmd_topic:=/web/ik_cmd     # у топика команд руки один издатель — шлюз
+      - -p
+      - base_frame:=base_link      # кадры TF идут без префикса
+    healthcheck:
+      # IK жив, когда его сервис зарегистрирован в графе.
+      test: ["CMD", "/entrypoint.sh", "bash", "-c",
+             "ros2 service list | grep -q /go_to_pose"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 45s
+
+  # ── шлюз ──────────────────────────────────────────────────────────────
+  gateway:
+    build:
+      context: ../gateway
+      dockerfile: ../deploy/Dockerfile.gateway
+    image: so101-gateway:dev
+    container_name: so101-gateway
+    depends_on:
+      ros:
+        condition: service_healthy
+    network_mode: "service:ros"
+    ipc: "service:ros"
+    restart: unless-stopped
+    logging: *logging
+    volumes:
+      - ./so101_follower.generated.urdf:/etc/so101/so101_follower.generated.urdf:ro
+
+    environment:
+      <<: *ros-env
+      ROBOT_BACKEND: ros2
+      # Без умолчания: с dev-токеном наружу торчала бы аварийная остановка
+      # и снятие оператора. `:?` роняет `compose up` с внятной ошибкой.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?не задан ADMIN_TOKEN - см. шапку файла}
+
+      # Режим привлечения внимания: рука сама делает жест, когда стенд давно
+      # пустует. Стоящий манипулятор читается как выключенный, мимо него
+      # проходят. Играется только когда нет ни оператора, ни очереди.
+      ATTRACT_ENABLED: ${ATTRACT_ENABLED:-1}
+      ATTRACT_AFTER_SEC: ${ATTRACT_AFTER_SEC:-120}
+      ATTRACT_PERIOD_SEC: ${ATTRACT_PERIOD_SEC:-240}
+
+      # Мягкая посадка: перед остановкой увести руку в низкую позу, чтобы она
+      # не падала с высоты, когда пропадёт питание приводов. Требует, чтобы
+      # контейнер `ros` был ещё жив — compose гасит gateway раньше него,
+      # потому что gateway от него зависит.
+      PARK_ON_SHUTDOWN: ${PARK_ON_SHUTDOWN:-1}
+      PARK_TIMEOUT_SEC: ${PARK_TIMEOUT_SEC:-8}
+
+      # Пределы суставов берутся ИЗ URDF, а не из захардкоженного запасного
+      # списка. Без этого шлюз честно предупреждает в лог, что значения могут
+      # разойтись с реальной сборкой руки, — и клэмп работает не по ней.
+      URDF_PATH: /etc/so101/so101_follower.generated.urdf
+      # Границы рабочей зоны обмерены (docs/ros-integration.md) и живут в
+      # config.py. Переопределять здесь — только если стенд стоит иначе.
+      # WORKSPACE_X: "0.15,0.38"
+      # WORKSPACE_Y: "-0.20,0.20"
+      # WORKSPACE_Z: "0.08,0.36"
+    command:
+      - python3
+      - -m
+      - uvicorn
+      - so101_gateway.app:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # ── источник кадров ───────────────────────────────────────────────────
+  # На боевом стенде камера ЕСТЬ, поэтому здесь по умолчанию стоит режим
+  # живой камеры. Пока камеру не привезли — уберите `devices` и поставьте
+  # source:="" (синтетический кадр) или source:=/opt/video/loop.mp4 (ролик).
+  #
+  # /dev/so101_camera — тот же приём, что и с рукой: udev-правило из
+  # deploy/99-so101.rules даёт стабильное имя вместо уезжающего /dev/videoN.
+  camera:
+    image: so101-ros:dev
+    container_name: so101-camera
+    depends_on:
+      ros:
+        condition: service_healthy
+    network_mode: "service:ros"
+    ipc: "service:ros"
+    restart: unless-stopped
+    logging: *logging
+    environment: *ros-env
+    volumes:
+      - ./video:/opt/video:ro
+    devices:
+      - "/dev/so101_camera:/dev/so101_camera"
+    command:
+      - python3
+      - /opt/video/demo_camera.py
+      - --ros-args
+      - -r
+      - __ns:=/static_camera            # → /static_camera/image_raw
+      - -p
+      - source:=/dev/so101_camera       # "" — синтетика, /opt/video/loop.mp4 — ролик
+      - -p
+      - fps:=15.0
+      - -p
+      - overlay:=false                  # на живой картинке накладка не нужна
+
+    # ── АЛЬТЕРНАТИВА: камерный стек апстрима ──────────────────────────────
+    # Даёт camera_info, калибровку и выбор из v4l2/gscam/libcam/realsense
+    # (upstream/so101_bringup/config/cameras/). Топик остаётся тем же —
+    # /static_camera/image_raw, — поэтому nginx и фронтенд не меняются.
+    # Цена: нужные пакеты НЕ стоят в образе (см. ROSDEP_SKIP_KEYS в
+    # deploy/Dockerfile.ros — они тянут несколько ГБ), образ придётся
+    # пересобрать без соответствующего ключа.
+    #   command:
+    #     - ros2
+    #     - launch
+    #     - so101_bringup
+    #     - cameras.launch.py
+    #     - cameras_config:=/opt/video/cameras.yaml
+
+  # ── MJPEG-мост ────────────────────────────────────────────────────────
+  video:
+    image: so101-ros:dev
+    container_name: so101-video
+    depends_on:
+      ros:
+        condition: service_healthy
+    network_mode: "service:ros"
+    ipc: "service:ros"
+    restart: unless-stopped
+    logging: *logging
+    environment: *ros-env
+    command:
+      - ros2
+      - run
+      - web_video_server
+      - web_video_server
+      - --ros-args
+      - -p
+      - port:=8081          # 8080 занят шлюзом: сетевое пространство общее
+      - -p
+      - address:=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null",
+             "http://localhost:8081/snapshot?topic=/static_camera/image_raw"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── nginx: единственная дверь наружу ──────────────────────────────────
+  # depends_on намеренно НЕТ. Сайт должен открываться, даже когда рука не
+  # поднялась: посетитель, отсканировавший QR, увидит страницу с честным
+  # «робот недоступен», а не «соединение отклонено» — по второму он решит,
+  # что сломан его телефон, и уйдёт. nginx резолвит `ros` в момент запроса,
+  # поэтому спокойно стартует раньше него: 502 будет только на /api, /ws
+  # и /video, статика раздаётся сразу.
+  web:
+    image: nginx:1.27-alpine
+    container_name: so101-web
+    restart: unless-stopped
+    logging: *logging
+    ports:
+      - "8080:80"           # адрес стенда: http://<ip>:8080 — он же в QR
+    volumes:
+      - ./nginx/so101.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../frontend/dist:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ── публичный туннель — ВЫКЛЮЧЕН ПО УМОЛЧАНИЮ ─────────────────────────
+  # Поднимается только явным флагом:
+  #     docker compose -f deploy/compose.prod.yml --profile tunnel up -d
+  # и гасится так же явно:
+  #     docker compose -f deploy/compose.prod.yml --profile tunnel stop cloudflared
+  #
+  # Это сознательное решение, а не состояние по умолчанию: за туннелем руку
+  # видит весь интернет, а очередь на стенде рассчитана на людей, стоящих
+  # рядом и видящих, что происходит. Публиковать стенд, за которым никто не
+  # смотрит, — плохая идея.
+  #
+  # Токен берётся в панели Cloudflare (Zero Trust → Networks → Tunnels).
+  # Public hostname туннеля должен указывать на  http://web:80  — не на
+  # шлюз напрямую: иначе мимо nginx пройдут и статика, и видео.
+  # Туннель отдаёт X-Forwarded-Proto: https, и nginx передаёт его шлюзу —
+  # cookie сессии получает флаг Secure (gateway/so101_gateway/rest.py).
+  # WebSocket cloudflared проксирует сам, отдельной настройки не нужно.
+  cloudflared:
+    image: cloudflare/cloudflared:2024.12.2
+    container_name: so101-tunnel
+    profiles: ["tunnel"]
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *logging
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      # Пустое умолчание обязательно, а не небрежность: подстановка переменных
+      # в compose происходит ДО отбора по профилям, поэтому `${TUNNEL_TOKEN:?...}`
+      # уронил бы обычный `up -d` — тот, в котором туннель вообще не участвует.
+      # Пустой токен ловит сам cloudflared: «Provided Tunnel token is not valid».
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+      TUNNEL_METRICS: "0.0.0.0:2000"
+    healthcheck:
+      test: ["CMD", "cloudflared", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

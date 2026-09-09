@@ -1,0 +1,98 @@
+[
+  {
+    "label": "нули",
+    "joints": {
+      "shoulder_pan": 0.0,
+      "shoulder_lift": 0.0,
+      "elbow_flex": 0.0,
+      "wrist_flex": 0.0,
+      "wrist_roll": 0.0,
+      "gripper": 0.09091
+    },
+    "ee": {
+      "x": 0.39136,
+      "y": -1e-05,
+      "z": 0.22647
+    }
+  },
+  {
+    "label": "home",
+    "joints": {
+      "shoulder_pan": 0.0,
+      "shoulder_lift": -0.9,
+      "elbow_flex": 0.9,
+      "wrist_flex": 0.0,
+      "wrist_roll": 0.0,
+      "gripper": 0.09091
+    },
+    "ee": {
+      "x": 0.29259,
+      "y": -1e-05,
+      "z": 0.20581
+    }
+  },
+  {
+    "label": "wave",
+    "joints": {
+      "shoulder_pan": 0.0,
+      "shoulder_lift": -1.2,
+      "elbow_flex": 0.6,
+      "wrist_flex": 0.0,
+      "wrist_roll": 1.2,
+      "gripper": 0.09091
+    },
+    "ee": {
+      "x": 0.21598,
+      "y": -0.00748,
+      "z": 0.35137
+    }
+  },
+  {
+    "label": "поворот основания",
+    "joints": {
+      "shoulder_pan": 0.8,
+      "shoulder_lift": -0.9,
+      "elbow_flex": 0.9,
+      "wrist_flex": 0.0,
+      "wrist_roll": 0.0,
+      "gripper": 0.09091
+    },
+    "ee": {
+      "x": 0.21562,
+      "y": -0.18204,
+      "z": 0.20581
+    }
+  },
+  {
+    "label": "кисть согнута",
+    "joints": {
+      "shoulder_pan": -0.5,
+      "shoulder_lift": -0.7,
+      "elbow_flex": 0.5,
+      "wrist_flex": -0.6,
+      "wrist_roll": 0.3,
+      "gripper": 0.09091
+    },
+    "ee": {
+      "x": 0.23905,
+      "y": 0.1067,
+      "z": 0.36156
+    }
+  },
+  {
+    "label": "вразнобой",
+    "joints": {
+      "shoulder_pan": 0.35,
+      "shoulder_lift": -1.0,
+      "elbow_flex": 1.1,
+      "wrist_flex": 0.4,
+      "wrist_roll": -1.5,
+      "gripper": 0.09091
+    },
+    "ee": {
+      "x": 0.25293,
+      "y": -0.06994,
+      "z": 0.11601
+    }
+  }
+]

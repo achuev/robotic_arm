@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "so101_gateway"
+version = "0.1.0"
+description = "WebSocket/REST-шлюз управления рукой SO-101 с мобильного сайта"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    # без реализации WS uvicorn отвечает на /ws "Unsupported upgrade request":
+    # TestClient её не требует, а живой браузер — да
+    "websockets>=12",
+    # кинематика из URDF: матрицы преобразований, якобиан, DLS-решатель.
+    # В ROS-образе numpy есть и так (его тянет rclpy), здесь он объявлен ради
+    # запуска шлюза на macOS без ROS.
+    "numpy>=1.24",
+]
+
+# rclpy сюда НЕ входит: на macOS его нет, а пакет обязан ставиться и работать
+# без ROS. ROS-зависимости объявлены в package.xml.
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+# Точка входа для `ros2 run so101_gateway gateway_node`; rclpy импортируется
+# лениво внутри main(), поэтому на macOS команда тоже запускается (в sim-режиме).
+gateway_node = "so101_gateway.node:main"
+
+[tool.setuptools.packages.find]
+include = ["so101_gateway*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.*",
+]
