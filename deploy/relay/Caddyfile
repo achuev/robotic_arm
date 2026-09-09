@@ -23,6 +23,11 @@
 		output stdout
 		format console
 	}
+	# Обычно h1 h2 h3. Сводится к «h1 h2», если 443/udp пришлось отдать
+	# WireGuard — так туннель проходит сквозь сети, где открыт только 443.
+	servers {
+		protocols {$SO101_HTTP_PROTOCOLS:h1 h2 h3}
+	}
 }
 
 {$SO101_SITE} {

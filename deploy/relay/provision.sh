@@ -20,6 +20,11 @@
 #   ufw         снаружи открыты только 22 (SSH), 80/443 (сайт) и 51820/udp
 #               (туннель). Остальное закрыто.
 #
+# ЕСЛИ ЗАЛ СИДИТ НА СОТОВОМ МОДЕМЕ. Два необязательных параметра:
+#   --mtu N     размер пакета в туннеле; замеряется на стенде `public.sh mtu`
+#   --port 443  если оператор режет UDP на нестандартных портах. Тогда HTTP/3
+#               выключается сам — этот порт уходит туннелю.
+#
 # ЧЕГО ЗДЕСЬ НЕТ И ПОЧЕМУ. Ни ROS, ни шлюза, ни драйвера — они обязаны быть на
 # машине, к которой рука подключена по USB. Сервер только пробрасывает трафик.
 # Из этого следует главное свойство: пока туннель опущен, сервер физически не
@@ -35,6 +40,7 @@ DOMAIN=""
 STAND_PUBKEY=""
 ACME_EMAIL=""
 WG_PORT=51820
+WG_MTU=1280
 WG_NET=10.8.0
 SERVER_IP="${WG_NET}.1"
 STAND_IP="${WG_NET}.2"
@@ -49,6 +55,7 @@ while [ $# -gt 0 ]; do
         --stand-pubkey) STAND_PUBKEY="$2"; shift 2 ;;
         --email)        ACME_EMAIL="$2"; shift 2 ;;
         --port)         WG_PORT="$2"; shift 2 ;;
+        --mtu)          WG_MTU="$2"; shift 2 ;;
         -h|--help)      sed -n '2,40p' "$0" | sed 's/^# \?//'; exit 0 ;;
         *) die "неизвестный аргумент: $1" ;;
     esac
@@ -107,6 +114,10 @@ cat > /etc/wireguard/wg0.conf <<EOF
 Address = ${SERVER_IP}/24
 ListenPort = ${WG_PORT}
 PrivateKey = $(cat /etc/wireguard/server.key)
+# Должен совпадать с MTU на стенде. Определяющая сторона — канал зала: если
+# он сотовый, полтора килобайта туда не влезают, и слишком большие пакеты
+# теряются молча. Замерить: `deploy/public.sh mtu` на стенде.
+MTU = ${WG_MTU}
 
 # Стенд. AllowedIPs строго один адрес: через туннель ходит только он,
 # маршрут по умолчанию не трогается.
@@ -116,17 +127,28 @@ AllowedIPs = ${STAND_IP}/32
 EOF
 chmod 600 /etc/wireguard/wg0.conf
 systemctl enable --now wg-quick@wg0 >/dev/null 2>&1 || systemctl restart wg-quick@wg0
-say "wg0 поднят на ${SERVER_IP}, порт ${WG_PORT}/udp"
+say "wg0 поднят на ${SERVER_IP}, порт ${WG_PORT}/udp, MTU ${WG_MTU}"
 
 step "4. Caddy"
 mkdir -p /var/www/so101 /etc/caddy
 install -m 644 "$(dirname "$0")/offline.html" /var/www/so101/offline.html
 install -m 644 "$(dirname "$0")/Caddyfile" /etc/caddy/Caddyfile
 
+# Если туннель забрал 443/udp, HTTP/3 придётся выключить: этот порт занят
+# WireGuard, и Caddy на нём не поднимется. Потеря невелика — HTTP/2 остаётся,
+# а возможность пройти сквозь сеть, где открыт только 443, важнее.
+if [ "$WG_PORT" = "443" ]; then
+    HTTP_PROTOCOLS="h1 h2"
+    say "порт 443/udp отдан туннелю → HTTP/3 выключен"
+else
+    HTTP_PROTOCOLS="h1 h2 h3"
+fi
+
 cat > /etc/caddy/so101.env <<EOF
 SO101_SITE=${SITE}
 SO101_UPSTREAM=${STAND_IP}:8080
 SO101_ACME_EMAIL=${ACME_EMAIL:-admin@${DOMAIN:-example.com}}
+SO101_HTTP_PROTOCOLS=${HTTP_PROTOCOLS}
 EOF
 chmod 600 /etc/caddy/so101.env
 
@@ -164,7 +186,8 @@ cat <<EOF
 
     deploy/public.sh configure \\
         --server-pubkey ${SERVER_PUBKEY} \\
-        --endpoint ${PUBLIC_IP}:${WG_PORT}${DOMAIN:+ \\
+        --endpoint ${PUBLIC_IP}:${WG_PORT} \\
+        --mtu ${WG_MTU}${DOMAIN:+ \\
         --domain ${DOMAIN}}
 
 После неё публичный доступ включается и выключается так:
