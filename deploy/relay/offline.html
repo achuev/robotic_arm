@@ -6,7 +6,7 @@
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7f9">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1118">
 <meta name="robots" content="noindex">
-<title>SO-101 · стенд сейчас выключен</title>
+<title>SO-101 · до робота не дотянуться</title>
 <style>
   /* Страница отдаётся, когда до стенда нет маршрута: публичный доступ
      выключен либо стенд обесточен. Человек пришёл по QR-коду с таблички и
@@ -25,6 +25,15 @@
   .arm { width: 96px; height: 96px; margin: 0 auto 28px; display: block; opacity: .45; }
   h1 { margin: 0 0 12px; font-size: 26px; line-height: 1.25; font-weight: 700; letter-spacing: -.01em; }
   p { margin: 0 0 10px; color: #5c6577; }
+  /* Подсказка тому, кто стоит перед рукой. Для него «загляните позже» —
+     неправда: робот работает у него на глазах, оборвался только путь через
+     интернет. Выделено рамкой: это единственная строка на странице, по
+     которой можно что-то сделать прямо сейчас. */
+  .here {
+    margin: 22px 0; padding: 16px 18px; text-align: left;
+    border: 1px solid #d7dce4; border-left: 3px solid #0e1118;
+    border-radius: 0 10px 10px 0; color: #0e1118;
+  }
   .hint {
     margin-top: 28px; padding-top: 20px; border-top: 1px solid #e2e6ec;
     font-size: 15px; color: #78829a;
@@ -32,6 +41,7 @@
   @media (prefers-color-scheme: dark) {
     body { background: #0e1118; color: #f6f7f9; }
     p { color: #98a2b8; }
+    .here { border-color: #2c333f; border-left-color: #f6f7f9; color: #f6f7f9; }
     .hint { border-color: #262c39; color: #78829a; }
   }
 </style>
@@ -49,9 +59,13 @@
     <circle cx="36" cy="37" r="3.5" fill="currentColor" stroke="none"/>
   </svg>
 
-  <h1>Стенд сейчас выключен</h1>
-  <p>Роботом можно управлять, только когда он включён и рядом есть кто-то из команды.</p>
-  <p>Загляните позже — ссылка та же, ничего пересканировать не нужно.</p>
+  <h1>До робота сейчас не дотянуться</h1>
+  <p>Он либо выключен, либо на минуту потерял связь.</p>
+
+  <p class="here"><strong>Вы стоите у стенда?</strong> Управление есть на экране
+  рядом с рукой. Робот работает — до него просто не доходит интернет.</p>
+
+  <p>Если нет — загляните позже. Ссылка та же, пересканировать ничего не нужно.</p>
 
   <p class="hint">С вашим телефоном всё в порядке: страница открылась, значит связь есть.</p>
 </main>
