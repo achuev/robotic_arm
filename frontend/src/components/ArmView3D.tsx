@@ -100,7 +100,7 @@ export function ArmView3D({ joints }: Props) {
   }, [joints]);
 
   return (
-    <div className="relative aspect-[4/3] w-full overflow-hidden bg-ink-50 dark:bg-ink-900">
+    <div className="relative aspect-[4/3] w-full overflow-hidden bg-ink-50 dark:bg-ink-900 lg:aspect-auto lg:h-full lg:min-h-0">
       <canvas
         ref={canvasRef}
         className="h-full w-full touch-none"

@@ -31,7 +31,7 @@ export function VideoStream({ src, enabled }: Props) {
   const showPlaceholder = !enabled || !src || failed;
 
   return (
-    <div className="relative aspect-[4/3] w-full overflow-hidden bg-ink-900 dark:bg-black">
+    <div className="relative aspect-[4/3] w-full overflow-hidden bg-ink-900 dark:bg-black lg:aspect-auto lg:h-full lg:min-h-0">
       {!showPlaceholder && (
         <img
           key={`${src}#${attempt}`}

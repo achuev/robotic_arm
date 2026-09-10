@@ -41,6 +41,8 @@ STAND_PUBKEY=""
 ACME_EMAIL=""
 WG_PORT=51820
 WG_MTU=1280
+MTU_GIVEN=0
+PORT_GIVEN=0
 WG_NET=10.8.0
 SERVER_IP="${WG_NET}.1"
 STAND_IP="${WG_NET}.2"
@@ -54,14 +56,34 @@ while [ $# -gt 0 ]; do
         --domain)       DOMAIN="$2"; shift 2 ;;
         --stand-pubkey) STAND_PUBKEY="$2"; shift 2 ;;
         --email)        ACME_EMAIL="$2"; shift 2 ;;
-        --port)         WG_PORT="$2"; shift 2 ;;
-        --mtu)          WG_MTU="$2"; shift 2 ;;
+        --port)         WG_PORT="$2"; PORT_GIVEN=1; shift 2 ;;
+        --mtu)          WG_MTU="$2"; MTU_GIVEN=1; shift 2 ;;
         -h|--help)      sed -n '2,40p' "$0" | sed 's/^# \?//'; exit 0 ;;
         *) die "неизвестный аргумент: $1" ;;
     esac
 done
 
 [ "$(id -u)" -eq 0 ] || die "запускайте от root: sudo ./provision.sh ..."
+
+# Повторный запуск: недостающее берём из уже развёрнутой конфигурации. Скрипт
+# и раньше был идемпотентным, но требовал заново передать ключ стенда — а
+# типичный повторный запуск делается ради ОДНОГО параметра: приехал модем,
+# замер показал другой MTU, оператор режет порт. Искать ради этого ключ в
+# переписке незачем.
+if [ -f /etc/wireguard/wg0.conf ]; then
+    [ -n "$STAND_PUBKEY" ] || STAND_PUBKEY="$(awk '/^PublicKey/{print $3; exit}' /etc/wireguard/wg0.conf)"
+    [ "$MTU_GIVEN" = "1" ] || WG_MTU="$(awk '/^MTU/{print $3; exit}' /etc/wireguard/wg0.conf || true)"
+    [ -n "$WG_MTU" ] || WG_MTU=1280
+    [ "$PORT_GIVEN" = "1" ] || WG_PORT="$(awk '/^ListenPort/{print $3; exit}' /etc/wireguard/wg0.conf)"
+fi
+if [ -z "$DOMAIN" ] && [ -f /etc/caddy/so101.env ]; then
+    prev_site="$(awk -F= '/^SO101_SITE=/{print $2; exit}' /etc/caddy/so101.env)"
+    case "$prev_site" in
+        :*|"") ;;                       # был режим «голый IP» — так и оставляем
+        *) DOMAIN="$prev_site"; say "домен взят из прежней настройки: $DOMAIN" ;;
+    esac
+fi
+
 [ -n "$STAND_PUBKEY" ] || die "нужен --stand-pubkey (возьмите из 'deploy/public.sh init' на стенде)"
 
 # Домен необязателен: без него сайт поднимется по HTTP на голом IP. Так можно

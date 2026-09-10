@@ -70,16 +70,36 @@ cmd_configure() {
     # практике проходит везде. Значение по умолчанию именно такое, потому что
     # цена ошибки несимметрична: лишние 10% накладных расходов против «туннель
     # поднялся, рукопожатие есть, а сайт не открывается». См. `$0 mtu`.
-    local mtu=1280
+    local mtu=1280 mtu_given=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --server-pubkey) server_pubkey="$2"; shift 2 ;;
             --endpoint)      endpoint="$2"; shift 2 ;;
             --domain)        domain="$2"; shift 2 ;;
-            --mtu)           mtu="$2"; shift 2 ;;
+            --mtu)           mtu="$2"; mtu_given=1; shift 2 ;;
             *) die "неизвестный аргумент: $1" ;;
         esac
     done
+    # Недостающее берём из уже настроенного туннеля. Это ради обычного
+    # случая: канал зала меняется (приехал модем, сменился оператор), и надо
+    # поправить ОДИН параметр. Требовать при этом заново ключ сервера и его
+    # адрес — значит заставлять искать их в переписке.
+    local reused=0
+    if [ -f "$CONF" ]; then
+        [ -n "$server_pubkey" ] && [ -n "$endpoint" ] || reused=1
+        [ -n "$server_pubkey" ] || server_pubkey="$(awk '/^PublicKey/{print $3; exit}' "$CONF")"
+        [ -n "$endpoint" ]      || endpoint="$(awk '/^Endpoint/{print $3; exit}' "$CONF")"
+        if [ "$mtu_given" -eq 0 ]; then
+            local prev_mtu
+            prev_mtu="$(awk '/^MTU/{print $3; exit}' "$CONF")"
+            [ -n "$prev_mtu" ] && mtu="$prev_mtu"
+        fi
+        if [ -z "$domain" ] && [ -f "$STATE" ]; then
+            . "$STATE" 2>/dev/null || true
+            domain="${DOMAIN:-}"
+        fi
+    fi
+
     [ -n "$server_pubkey" ] || die "нужен --server-pubkey (его печатает provision.sh)"
     [ -n "$endpoint" ] || die "нужен --endpoint вида 1.2.3.4:51820"
     [ -f "$KEYDIR/stand.key" ] || die "сначала: sudo $0 init"
@@ -111,6 +131,9 @@ EOF
     printf 'ENDPOINT=%s\nDOMAIN=%s\n' "$endpoint" "$domain" > "$STATE"
     chmod 644 "$STATE"
 
+    if [ "$reused" -eq 1 ]; then
+        say "недостающее взято из прежней настройки"
+    fi
     say "туннель настроен на ${endpoint}, MTU ${mtu}"
     [ -n "$domain" ] && say "публичный адрес: https://${domain}"
     echo

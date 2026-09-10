@@ -41,6 +41,9 @@ export function Control() {
   // рука убедительнее модели. На стенде она выключена (features.video), и
   // тогда переключаться не из чего: модель занимает весь верх, вкладок нет.
   const [view, setView] = useState<View>('camera');
+  const [videoForced] = useState(
+    () => new URLSearchParams(window.location.search).get('video') === '1',
+  );
 
   const controlling = state.phase === 'controlling';
   const now = useNow(250, controlling);
@@ -51,7 +54,12 @@ export function Control() {
   const cartesian = config?.features.cartesian === true;
   // Пока конфиг не пришёл, камеры нет: иначе на секунду мигнёт пустая
   // рамка потока, которого не будет.
-  const videoEnabled = config?.features.video === true;
+  //
+  // ?video=1 включает камеру поверх флага — для панели на самом стенде, где
+  // поток идёт по локальной сети и ничего не стоит. Снаружи этот параметр
+  // бесполезен и потому безопасен: ретранслятор отдаёт на /video/* 404,
+  // запрет стоит не здесь.
+  const videoEnabled = videoForced || config?.features.video === true;
   const stalled = isMotionStalled(
     state,
     now,
@@ -116,7 +124,10 @@ export function Control() {
   const activeTab: Tab = cartesian ? tab : 'joints';
 
   return (
-    <div className="flex min-h-dvh flex-col overflow-x-hidden">
+    /* lg: панель стенда. Экран ноутбука — не растянутый телефон: вид на
+       руку остаётся на месте, а управление скроллится рядом. На узком
+       всё как было, медиазапрос телефона не касается. */
+    <div className="flex min-h-dvh flex-col overflow-x-hidden lg:h-dvh lg:overflow-hidden">
       {state.estop && <EstopBanner />}
 
       {/* Шапка: статус робота и, когда ход наш, таймер. */}
@@ -155,26 +166,35 @@ export function Control() {
         </div>
       </header>
 
-      {videoEnabled && view === 'camera' ? (
-        <VideoStream src={config ? videoUrl(config) : null} enabled />
-      ) : (
-        <ArmView3D joints={state.joints} />
-      )}
+      {/* На телефоне вид сверху, управление под ним. На широком экране
+          колонки меняются местами: ползунки слева, рука справа. Порядок в
+          разметке при этом прежний — так на телефоне вид остаётся первым,
+          а обход с клавиатуры не зависит от ширины. */}
+      <div className="flex flex-1 flex-col lg:min-h-0 lg:flex-row-reverse">
+        {/* На что смотрят. */}
+        <div className="flex flex-col lg:min-h-0 lg:flex-1">
+          {videoEnabled && view === 'camera' ? (
+            <VideoStream src={config ? videoUrl(config) : null} enabled />
+          ) : (
+            <ArmView3D joints={state.joints} />
+          )}
 
-      {videoEnabled && (
-        <div className="safe-x pt-2">
-          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-ink-100 p-1 dark:bg-ink-900">
-            <TabButton active={view === 'camera'} onClick={() => setView('camera')}>
-              Камера
-            </TabButton>
-            <TabButton active={view === 'model'} onClick={() => setView('model')}>
-              Модель
-            </TabButton>
-          </div>
+          {videoEnabled && (
+            <div className="safe-x pt-2 lg:shrink-0 lg:px-3 lg:pb-3">
+              <div className="grid grid-cols-2 gap-2 rounded-2xl bg-ink-100 p-1 dark:bg-ink-900">
+                <TabButton active={view === 'camera'} onClick={() => setView('camera')}>
+                  Камера
+                </TabButton>
+                <TabButton active={view === 'model'} onClick={() => setView('model')}>
+                  Модель
+                </TabButton>
+              </div>
+            </div>
+          )}
         </div>
-      )}
 
-      <main className="safe-x flex-1">
+        {/* Чем управляют. */}
+        <main className="safe-x flex-1 lg:w-[26rem] lg:min-h-0 lg:shrink-0 lg:overflow-y-auto lg:border-r lg:border-ink-200 lg:dark:border-ink-800">
         {state.phase === 'observer' && (
           <ObserverCard state={state} onEnqueue={() => cm?.enqueue()} />
         )}
@@ -278,7 +298,8 @@ export function Control() {
             </button>
           </div>
         )}
-      </main>
+        </main>
+      </div>
 
       <div className="safe-bottom" />
       <Toast
