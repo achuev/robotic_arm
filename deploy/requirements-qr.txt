@@ -8,3 +8,6 @@ pillow==11.0.0
 
 # deploy/servo_scan.py — сканер шины сервоприводов
 pyserial==3.5
+
+# deploy/arm.py — управление рукой из терминала через шлюз
+websockets==17.1
