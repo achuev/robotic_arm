@@ -1,0 +1,6 @@
+[Unit]
+Description=SO-101 robot watchdog (restart arm stack on error)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/so101-robot-watchdog.sh

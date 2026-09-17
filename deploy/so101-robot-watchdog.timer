@@ -1,0 +1,10 @@
+[Unit]
+Description=SO-101 robot watchdog every minute
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+Unit=so101-robot-watchdog.service
+
+[Install]
+WantedBy=timers.target

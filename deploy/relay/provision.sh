@@ -138,7 +138,7 @@ ListenPort = ${WG_PORT}
 PrivateKey = $(cat /etc/wireguard/server.key)
 # Должен совпадать с MTU на стенде. Определяющая сторона — канал зала: если
 # он сотовый, полтора килобайта туда не влезают, и слишком большие пакеты
-# теряются молча. Замерить: `deploy/public.sh mtu` на стенде.
+# теряются молча. Замерить: deploy/public.sh mtu на стенде.
 MTU = ${WG_MTU}
 
 # Стенд. AllowedIPs строго один адрес: через туннель ходит только он,
@@ -153,6 +153,8 @@ say "wg0 поднят на ${SERVER_IP}, порт ${WG_PORT}/udp, MTU ${WG_MTU}"
 
 step "4. Caddy"
 mkdir -p /var/www/so101 /etc/caddy
+# umask 077 выше (ради ключей) сделал бы каталог недоступным caddy
+chmod 755 /var/www/so101
 install -m 644 "$(dirname "$0")/offline.html" /var/www/so101/offline.html
 install -m 644 "$(dirname "$0")/Caddyfile" /etc/caddy/Caddyfile
 

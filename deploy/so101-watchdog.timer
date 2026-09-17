@@ -1,0 +1,10 @@
+[Unit]
+Description=SO-101 tunnel watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Unit=so101-watchdog.service
+
+[Install]
+WantedBy=timers.target

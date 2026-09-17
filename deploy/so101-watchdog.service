@@ -1,0 +1,6 @@
+[Unit]
+Description=SO-101 tunnel watchdog (restart stale WireGuard handshake)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/so101-watchdog.sh
